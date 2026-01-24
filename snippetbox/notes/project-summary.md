@@ -10,9 +10,9 @@ A web application for sharing code/text snippets, built following the **"Let's G
 snippetbox/
 ├── cmd/
 │   └── web/
-│       ├── main.go         # Entry point, DI setup
+│       ├── main.go         # Entry point, DI setup, TLS config
 │       ├── handlers.go     # HTTP handlers
-│       ├── routes.go       # Routing configuration
+│       ├── routes.go       # Routing & middleware chains
 │       ├── helpers.go      # Helper functions
 │       ├── middleware.go   # Middleware functions
 │       └── templates.go    # Template caching & functions
@@ -22,6 +22,9 @@ snippetbox/
 │   │   └── errors.go       # Custom errors
 │   └── validator/
 │       └── validator.go    # Form validation
+├── tls/
+│   ├── cert.pem            # TLS certificate
+│   └── key.pem             # TLS private key
 ├── ui/
 │   ├── html/
 │   │   ├── base.tmpl       # Base template
@@ -45,6 +48,7 @@ type application struct {
     snippets       *models.SnippetModel
     templateCache  map[string]*template.Template
     formDecoder    *form.Decoder
+    sessionManager *scs.SessionManager
 }
 ```
 
@@ -56,17 +60,20 @@ All handlers are methods on `*application`, providing access to shared dependenc
 
 **File:** `cmd/web/middleware.go`
 
-| Middleware     | Purpose                                                                    |
-| -------------- | -------------------------------------------------------------------------- |
-| `commonHeader` | Sets security headers (CSP, X-Frame-Options, X-Content-Type-Options, etc.) |
-| `logRequest`   | Logs incoming requests using structured logging                            |
-| `recoverPanic` | Graceful panic recovery to prevent server crashes                          |
+| Middleware     | Purpose                                            |
+| -------------- | -------------------------------------------------- |
+| `commonHeader` | Sets security headers (CSP, X-Frame-Options, etc.) |
+| `logRequest`   | Logs incoming requests using structured logging    |
+| `recoverPanic` | Graceful panic recovery to prevent server crashes  |
 
-**Middleware chaining with Alice:**
+**File:** `cmd/web/routes.go`
 
 ```go
+// Global middleware chain
 standard := alice.New(app.recoverPanic, app.logRequest, commonHeader)
-return standard.Then(mux)
+
+// Dynamic routes middleware (with sessions)
+dynamic := alice.New(app.sessionManager.LoadAndSave)
 ```
 
 ---
@@ -75,13 +82,13 @@ return standard.Then(mux)
 
 **File:** `cmd/web/helpers.go`
 
-| Function         | Purpose                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `serverError`    | Logs 500 errors with stack trace                                  |
-| `clientError`    | Returns client-facing HTTP errors                                 |
-| `render`         | Template rendering with buffer (prevents partial writes on error) |
-| `newTemplates`   | Creates template data with common fields                          |
-| `decodePostForm` | Generic form decoding with error handling                         |
+| Function         | Purpose                                                   |
+| ---------------- | --------------------------------------------------------- |
+| `serverError`    | Logs 500 errors with stack trace                          |
+| `clientError`    | Returns client-facing HTTP errors                         |
+| `render`         | Template rendering with buffer (prevents partial writes)  |
+| `newTemplates`   | Creates template data with common fields + flash messages |
+| `decodePostForm` | Generic form decoding with error handling                 |
 
 ---
 
@@ -94,6 +101,14 @@ return standard.Then(mux)
 - **Template inheritance** using base + pages + partials
 
 ```go
+type TemplatesData struct {
+    CurrentYear int
+    Snippet     models.Snippet
+    Snippets    []models.Snippet
+    Form        any
+    Flash       string  // For flash messages
+}
+
 var functions = template.FuncMap{
     "humanDate": humanDate,
 }
@@ -172,10 +187,10 @@ if errors.Is(err, models.ErrNoRecord) {
 **File:** `cmd/web/routes.go`
 
 ```go
-mux.HandleFunc("GET /{$}", app.home)              // Exact match for root
-mux.HandleFunc("GET /snippet/view/{id}", ...)     // Path parameters
-mux.HandleFunc("GET /snippet/create", ...)        // GET for form
-mux.HandleFunc("POST /snippet/create", ...)       // POST for submission
+mux.Handle("GET /{$}", dynamic.ThenFunc(app.home))              // Exact match
+mux.Handle("GET /snippet/view/{id}", dynamic.ThenFunc(...))     // Path parameters
+mux.Handle("GET /snippet/create", dynamic.ThenFunc(...))        // GET for form
+mux.Handle("POST /snippet/create", dynamic.ThenFunc(...))       // POST for submission
 ```
 
 ---
@@ -204,6 +219,94 @@ flag.Parse()
 
 ---
 
+### 11. Session Management
+
+**Package:** `github.com/alexedwards/scs/v2` with `mysqlstore`
+
+**File:** `cmd/web/main.go`
+
+```go
+sessionManager := scs.New()
+sessionManager.Store = mysqlstore.New(db)  // Store sessions in MySQL
+sessionManager.Lifetime = 12 * time.Hour   // Session expires after 12 hours
+```
+
+**How sessions work:**
+
+1. `LoadAndSave` middleware loads session from MySQL
+
+2. Session data attached to request context
+
+3. Handler can read/write session data
+
+4. Middleware saves session back to MySQL
+
+---
+
+### 12. Flash Messages
+
+**File:** `cmd/web/handlers.go`
+
+```go
+// After creating a snippet, set a flash message
+app.sessionManager.Put(r.Context(), "flash", "Snippet successfully created!")
+```
+
+**File:** `cmd/web/helpers.go`
+
+```go
+func (app *application) newTemplates(r *http.Request) TemplatesData {
+    return TemplatesData{
+        CurrentYear: time.Now().Year(),
+        Flash:       app.sessionManager.PopString(r.Context(), "flash"),
+    }
+}
+```
+
+**How flash messages work:**
+
+1. `Put()` stores message in session
+2. `PopString()` retrieves AND removes message
+3. Message only shows once (one-time notifications)
+
+---
+
+### 13. HTTPS/TLS Support
+
+**File:** `cmd/web/main.go`
+
+```go
+tlsConfig := &tls.Config{
+    CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
+}
+
+srv := &http.Server{
+    Addr:         *addr,
+    Handler:      app.routes(),
+    ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
+    TLSConfig:    tlsConfig,
+    IdleTimeout:  60 * time.Second,
+    ReadTimeout:  5 * time.Second,
+    WriteTimeout: 10 * time.Second,
+}
+
+err = srv.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
+```
+
+**Server timeouts:**
+| Timeout | Value | Purpose |
+|---------|-------|---------|
+| `IdleTimeout` | 60s | Close idle keep-alive connections |
+| `ReadTimeout` | 5s | Prevent slow client attacks |
+| `WriteTimeout` | 10s | Prevent slow response attacks |
+
+**TLS Curve Preferences:**
+
+- `X25519` - Modern, fast elliptic curve (preferred)
+- `CurveP256` - NIST P-256 curve (fallback)
+
+---
+
 ## 📊 Progress Checklist
 
 | Topic                                         | Status     |
@@ -219,30 +322,43 @@ flag.Parse()
 | Middleware (Logging, Headers, Panic Recovery) | ✅ Done    |
 | Form Processing & Validation                  | ✅ Done    |
 | RESTful Routing                               | ✅ Done    |
-| Sessions                                      | ⬜ Not yet |
+| Sessions (MySQL Store)                        | ✅ Done    |
+| Flash Messages                                | ✅ Done    |
+| HTTPS/TLS                                     | ✅ Done    |
+| Server Timeouts                               | ✅ Done    |
 | User Authentication                           | ⬜ Not yet |
 | CSRF Protection                               | ⬜ Not yet |
-| HTTPS/TLS                                     | ⬜ Not yet |
 | Testing                                       | ⬜ Not yet |
 
 ---
 
 ## 📚 Key Packages Used
 
-| Package                            | Purpose               |
-| ---------------------------------- | --------------------- |
-| `net/http`                         | HTTP server & routing |
-| `database/sql`                     | Database interface    |
-| `github.com/go-sql-driver/mysql`   | MySQL driver          |
-| `html/template`                    | HTML templating       |
-| `log/slog`                         | Structured logging    |
-| `github.com/justinas/alice`        | Middleware chaining   |
-| `github.com/go-playground/form/v4` | Form decoding         |
+| Package                                 | Purpose               |
+| --------------------------------------- | --------------------- |
+| `net/http`                              | HTTP server & routing |
+| `database/sql`                          | Database interface    |
+| `github.com/go-sql-driver/mysql`        | MySQL driver          |
+| `html/template`                         | HTML templating       |
+| `log/slog`                              | Structured logging    |
+| `github.com/justinas/alice`             | Middleware chaining   |
+| `github.com/go-playground/form/v4`      | Form decoding         |
+| `github.com/alexedwards/scs/v2`         | Session management    |
+| `github.com/alexedwards/scs/mysqlstore` | MySQL session store   |
+| `crypto/tls`                            | TLS configuration     |
 
 ---
 
 ## 🔗 Quick Reference
 
-- **Start server:** `go run ./cmd/web`
+- **Start server (HTTPS):** `go run ./cmd/web`
 - **With custom port:** `go run ./cmd/web -addr=":8080"`
-- **Access app:** `http://localhost:4000`
+- **Access app:** `https://localhost:4000`
+
+---
+
+## 📝 Related Notes
+
+- [Go Embedding](./go-embedding.md) - Struct embedding & composition
+
+- [Go Panic/Recover](./go-panic-recover.md) - Panic handling
