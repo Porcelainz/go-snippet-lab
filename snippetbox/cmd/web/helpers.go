@@ -26,7 +26,7 @@ func (app *application) clientError(w http.ResponseWriter, status int) {
 }
 
 func (app *application) render(w http.ResponseWriter, r *http.Request, status int, page string, data TemplatesData) {
-	ts, ok := app.temeplateCache[page]
+	ts, ok := app.templateCache[page]
 	if !ok {
 		err := fmt.Errorf("template not found: %s", page)
 		app.serverError(w, r, err)

@@ -19,7 +19,7 @@ import (
 type application struct {
 	logger         *slog.Logger
 	snippets       *models.SnippetModel
-	temeplateCache map[string]*template.Template
+	templateCache  map[string]*template.Template
 	formDecoder    *form.Decoder
 	sessionManager *scs.SessionManager
 }
@@ -36,7 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	templates, err := newTamplateCache()
+	templates, err := newTemplateCache()
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
@@ -48,7 +48,7 @@ func main() {
 	app := &application{
 		logger:         logger,
 		snippets:       &models.SnippetModel{DB: db},
-		temeplateCache: templates,
+		templateCache:  templates,
 		formDecoder:    formDecoder,
 		sessionManager: sessionManager,
 	}
