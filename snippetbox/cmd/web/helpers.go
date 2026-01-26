@@ -46,9 +46,16 @@ func (app *application) render(w http.ResponseWriter, r *http.Request, status in
 }
 
 func (app *application) newTemplates(r *http.Request) TemplatesData {
-	return TemplatesData{CurrentYear: time.Now().Year(),
-		Flash: app.sessionManager.PopString(r.Context(), "flash")}
+	return TemplatesData{
+		CurrentYear:     time.Now().Year(),
+		Flash:           app.sessionManager.PopString(r.Context(), "flash"),
+		IsAuthenticated: app.isAuthenticated(r),
+	}
+}
 
+// isAuthenticated returns true if the current request is from an authenticated user
+func (app *application) isAuthenticated(r *http.Request) bool {
+	return app.sessionManager.Exists(r.Context(), "authenticatedUserID")
 }
 
 func (app *application) decodePostForm(r *http.Request, dst any) error {
