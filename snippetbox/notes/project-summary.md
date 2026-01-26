@@ -398,60 +398,144 @@ type userSignupForm struct {
 5. Handle duplicate email errors gracefully
 6. Set flash message and redirect to login
 
-#### User Routes
+#### User Login Flow
+
+**File:** `cmd/web/handlers.go`
+
+```go
+type userLoginForm struct {
+    Email               string `form:"email"`
+    Password            string `form:"password"`
+    validator.Validator `form:"-"`
+}
+```
+
+**Login process:**
+
+1. Parse form data using `decodePostForm()`
+2. Validate email format and password presence
+3. Call `Authenticate()` to verify credentials with bcrypt
+4. On failure: add non-field error (security: no hint which field is wrong)
+5. On success: `RenewToken()` to prevent session fixation
+6. Store `authenticatedUserID` in session
+7. Redirect to `/snippet/create`
+
+**Logout process:**
+
+1. `RenewToken()` for security
+2. `Remove("authenticatedUserID")` from session
+3. Flash message "You've been logged out successfully!"
+4. Redirect to home
+
+#### Authentication Helpers
+
+**File:** `cmd/web/helpers.go`
+
+```go
+// isAuthenticated checks if user is logged in
+func (app *application) isAuthenticated(r *http.Request) bool {
+    return app.sessionManager.Exists(r.Context(), "authenticatedUserID")
+}
+```
+
+#### Dynamic Navigation
+
+**File:** `cmd/web/templates.go`
+
+```go
+type TemplatesData struct {
+    // ... other fields
+    IsAuthenticated bool  // Set automatically by newTemplates()
+}
+```
+
+**File:** `ui/html/partials/nav.tmpl`
+
+| Authenticated User | Unauthenticated User |
+| ------------------ | -------------------- |
+| Home               | Home                 |
+| Create snippet     | Signup               |
+| Logout (button)    | Login                |
+
+---
+
+### 15. Authorization (Route Protection)
+
+**File:** `cmd/web/middleware.go`
+
+```go
+// requireAuthentication redirects unauthenticated users to login
+func (app *application) requireAuthentication(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if !app.isAuthenticated(r) {
+            http.Redirect(w, r, "/user/login", http.StatusSeeOther)
+            return
+        }
+        // Prevent caching of protected pages
+        w.Header().Add("Cache-Control", "no-store")
+        next.ServeHTTP(w, r)
+    })
+}
+```
 
 **File:** `cmd/web/routes.go`
 
 ```go
-mux.Handle("GET /user/signup", dynamic.ThenFunc(app.userSignup))
-mux.Handle("POST /user/signup", dynamic.ThenFunc(app.userSignupPost))
-mux.Handle("GET /user/login", dynamic.ThenFunc(app.userLogin))
-mux.Handle("POST /user/login", dynamic.ThenFunc(app.userLoginPost))
-mux.Handle("POST /user/logout", dynamic.ThenFunc(app.userLogoutPost))
+// Unprotected routes (available to all)
+dynamic := alice.New(app.sessionManager.LoadAndSave)
+
+// Protected routes (require login)
+protected := dynamic.Append(app.requireAuthentication)
+mux.Handle("GET /snippet/create", protected.ThenFunc(app.snippetCreate))
+mux.Handle("POST /snippet/create", protected.ThenFunc(app.snippetCreatePost))
+mux.Handle("POST /user/logout", protected.ThenFunc(app.userLogoutPost))
 ```
+
+**Protected Routes:**
+| Route | Method | Handler |
+|-------|--------|--------|
+| `/snippet/create` | GET | Show create form |
+| `/snippet/create` | POST | Save new snippet |
+| `/user/logout` | POST | Log out user |
 
 #### Extended Validation Helpers
 
 **File:** `internal/validator/validator.go`
 
-| Function     | Purpose                             |
-| ------------ | ----------------------------------- |
-| `MinChars()` | Minimum character count validation  |
-| `Matches()`  | Regex pattern matching (for email)  |
-| `EmailRX`    | Compiled regex for email validation |
-
-```go
-var EmailRX = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@...")
-
-form.CheckField(validator.Matches(form.Email, validator.EmailRX), "email", "...")
-form.CheckField(validator.MinChars(form.Password, 8), "password", "...")
-```
+| Function             | Purpose                                   |
+| -------------------- | ----------------------------------------- |
+| `MinChars()`         | Minimum character count validation        |
+| `Matches()`          | Regex pattern matching (for email)        |
+| `EmailRX`            | Compiled regex for email validation       |
+| `AddNonFieldError()` | Add form-level error (not field-specific) |
 
 ---
 
 ## 📊 Progress Checklist
 
-| Topic                                         | Status         |
-| --------------------------------------------- | -------------- |
-| Basic HTTP Server                             | ✅ Done        |
-| Project Structure                             | ✅ Done        |
-| Configuration & CLI Flags                     | ✅ Done        |
-| Structured Logging (slog)                     | ✅ Done        |
-| Dependency Injection                          | ✅ Done        |
-| Database (MySQL) Setup                        | ✅ Done        |
-| Repository/Model Layer                        | ✅ Done        |
-| HTML Templates & Caching                      | ✅ Done        |
-| Middleware (Logging, Headers, Panic Recovery) | ✅ Done        |
-| Form Processing & Validation                  | ✅ Done        |
-| RESTful Routing                               | ✅ Done        |
-| Sessions (MySQL Store)                        | ✅ Done        |
-| Flash Messages                                | ✅ Done        |
-| HTTPS/TLS                                     | ✅ Done        |
-| Server Timeouts                               | ✅ Done        |
-| User Authentication (Signup)                  | ✅ Done        |
-| User Authentication (Login/Logout)            | 🔄 In Progress |
-| CSRF Protection                               | ⬜ Not yet     |
-| Testing                                       | ⬜ Not yet     |
+| Topic                                         | Status     |
+| --------------------------------------------- | ---------- |
+| Basic HTTP Server                             | ✅ Done    |
+| Project Structure                             | ✅ Done    |
+| Configuration & CLI Flags                     | ✅ Done    |
+| Structured Logging (slog)                     | ✅ Done    |
+| Dependency Injection                          | ✅ Done    |
+| Database (MySQL) Setup                        | ✅ Done    |
+| Repository/Model Layer                        | ✅ Done    |
+| HTML Templates & Caching                      | ✅ Done    |
+| Middleware (Logging, Headers, Panic Recovery) | ✅ Done    |
+| Form Processing & Validation                  | ✅ Done    |
+| RESTful Routing                               | ✅ Done    |
+| Sessions (MySQL Store)                        | ✅ Done    |
+| Flash Messages                                | ✅ Done    |
+| HTTPS/TLS                                     | ✅ Done    |
+| Server Timeouts                               | ✅ Done    |
+| User Authentication (Signup)                  | ✅ Done    |
+| User Authentication (Login/Logout)            | ✅ Done    |
+| Authorization (Route Protection)              | ✅ Done    |
+| Dynamic Navigation                            | ✅ Done    |
+| CSRF Protection                               | ⬜ Not yet |
+| Testing                                       | ⬜ Not yet |
 
 ---
 
