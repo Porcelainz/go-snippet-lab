@@ -19,6 +19,7 @@ snippetbox/
 ├── internal/
 │   ├── models/
 │   │   ├── snippets.go     # Snippet CRUD operations
+│   │   ├── users.go        # User CRUD & authentication
 │   │   └── errors.go       # Custom errors
 │   └── validator/
 │       └── validator.go    # Form validation
@@ -28,7 +29,7 @@ snippetbox/
 ├── ui/
 │   ├── html/
 │   │   ├── base.tmpl       # Base template
-│   │   ├── pages/          # Page templates
+│   │   ├── pages/          # Page templates (home, view, create, signup)
 │   │   └── partials/       # Partial templates
 │   └── static/             # CSS, JS, images
 └── notes/                  # Learning notes
@@ -307,45 +308,168 @@ err = srv.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
 
 ---
 
+### 14. User Authentication
+
+**Files:** `internal/models/users.go`, `cmd/web/handlers.go`
+
+#### User Model
+
+```go
+type User struct {
+    ID             int
+    Name           string
+    Email          string
+    HashedPassword []byte
+    Created        time.Time
+}
+
+type UserModel struct {
+    DB *sql.DB
+}
+```
+
+#### UserModel Methods
+
+| Method             | Purpose                                     |
+| ------------------ | ------------------------------------------- |
+| `Insert()`         | Create new user with bcrypt-hashed password |
+| `Authenticate()`   | Verify email/password, return user ID       |
+| `Exists()`         | Check if user exists by ID                  |
+| `Get()`            | Retrieve user by ID                         |
+| `Update()`         | Modify user's name and email                |
+| `UpdatePassword()` | Change password (verifies current first)    |
+| `Delete()`         | Remove user from database                   |
+| `List()`           | Retrieve all users (admin functionality)    |
+
+#### Password Security with bcrypt
+
+```go
+// Hashing password on signup (cost factor = 12)
+hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+
+// Verifying password on login
+err = bcrypt.CompareHashAndPassword(hashedPassword, []byte(password))
+```
+
+**Why bcrypt?**
+
+- Automatically handles salting
+- Configurable cost factor (work factor)
+- Designed to be slow (prevents brute-force attacks)
+- Industry standard for password hashing
+
+#### Authentication Errors
+
+**File:** `internal/models/errors.go`
+
+```go
+var (
+    ErrNoRecord           = errors.New("models: no matching record found")
+    ErrInvalidCredentials = errors.New("models: invalid credentials")
+    ErrDuplicateEmail     = errors.New("models: duplicate email")
+)
+```
+
+#### User Signup Flow
+
+**File:** `cmd/web/handlers.go`
+
+```go
+type userSignupForm struct {
+    Name                string `form:"name"`
+    Email               string `form:"email"`
+    Password            string `form:"password"`
+    validator.Validator `form:"-"`
+}
+```
+
+**Validation rules:**
+
+- Name: Required (not blank)
+- Email: Required, valid email format (regex)
+- Password: Required, minimum 8 characters
+
+**Signup process:**
+
+1. Parse form data using `decodePostForm()`
+2. Validate all fields with `validator`
+3. Hash password with bcrypt
+4. Insert user into database
+5. Handle duplicate email errors gracefully
+6. Set flash message and redirect to login
+
+#### User Routes
+
+**File:** `cmd/web/routes.go`
+
+```go
+mux.Handle("GET /user/signup", dynamic.ThenFunc(app.userSignup))
+mux.Handle("POST /user/signup", dynamic.ThenFunc(app.userSignupPost))
+mux.Handle("GET /user/login", dynamic.ThenFunc(app.userLogin))
+mux.Handle("POST /user/login", dynamic.ThenFunc(app.userLoginPost))
+mux.Handle("POST /user/logout", dynamic.ThenFunc(app.userLogoutPost))
+```
+
+#### Extended Validation Helpers
+
+**File:** `internal/validator/validator.go`
+
+| Function     | Purpose                             |
+| ------------ | ----------------------------------- |
+| `MinChars()` | Minimum character count validation  |
+| `Matches()`  | Regex pattern matching (for email)  |
+| `EmailRX`    | Compiled regex for email validation |
+
+```go
+var EmailRX = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@...")
+
+form.CheckField(validator.Matches(form.Email, validator.EmailRX), "email", "...")
+form.CheckField(validator.MinChars(form.Password, 8), "password", "...")
+```
+
+---
+
 ## 📊 Progress Checklist
 
-| Topic                                         | Status     |
-| --------------------------------------------- | ---------- |
-| Basic HTTP Server                             | ✅ Done    |
-| Project Structure                             | ✅ Done    |
-| Configuration & CLI Flags                     | ✅ Done    |
-| Structured Logging (slog)                     | ✅ Done    |
-| Dependency Injection                          | ✅ Done    |
-| Database (MySQL) Setup                        | ✅ Done    |
-| Repository/Model Layer                        | ✅ Done    |
-| HTML Templates & Caching                      | ✅ Done    |
-| Middleware (Logging, Headers, Panic Recovery) | ✅ Done    |
-| Form Processing & Validation                  | ✅ Done    |
-| RESTful Routing                               | ✅ Done    |
-| Sessions (MySQL Store)                        | ✅ Done    |
-| Flash Messages                                | ✅ Done    |
-| HTTPS/TLS                                     | ✅ Done    |
-| Server Timeouts                               | ✅ Done    |
-| User Authentication                           | ⬜ Not yet |
-| CSRF Protection                               | ⬜ Not yet |
-| Testing                                       | ⬜ Not yet |
+| Topic                                         | Status         |
+| --------------------------------------------- | -------------- |
+| Basic HTTP Server                             | ✅ Done        |
+| Project Structure                             | ✅ Done        |
+| Configuration & CLI Flags                     | ✅ Done        |
+| Structured Logging (slog)                     | ✅ Done        |
+| Dependency Injection                          | ✅ Done        |
+| Database (MySQL) Setup                        | ✅ Done        |
+| Repository/Model Layer                        | ✅ Done        |
+| HTML Templates & Caching                      | ✅ Done        |
+| Middleware (Logging, Headers, Panic Recovery) | ✅ Done        |
+| Form Processing & Validation                  | ✅ Done        |
+| RESTful Routing                               | ✅ Done        |
+| Sessions (MySQL Store)                        | ✅ Done        |
+| Flash Messages                                | ✅ Done        |
+| HTTPS/TLS                                     | ✅ Done        |
+| Server Timeouts                               | ✅ Done        |
+| User Authentication (Signup)                  | ✅ Done        |
+| User Authentication (Login/Logout)            | 🔄 In Progress |
+| CSRF Protection                               | ⬜ Not yet     |
+| Testing                                       | ⬜ Not yet     |
 
 ---
 
 ## 📚 Key Packages Used
 
-| Package                                 | Purpose               |
-| --------------------------------------- | --------------------- |
-| `net/http`                              | HTTP server & routing |
-| `database/sql`                          | Database interface    |
-| `github.com/go-sql-driver/mysql`        | MySQL driver          |
-| `html/template`                         | HTML templating       |
-| `log/slog`                              | Structured logging    |
-| `github.com/justinas/alice`             | Middleware chaining   |
-| `github.com/go-playground/form/v4`      | Form decoding         |
-| `github.com/alexedwards/scs/v2`         | Session management    |
-| `github.com/alexedwards/scs/mysqlstore` | MySQL session store   |
-| `crypto/tls`                            | TLS configuration     |
+| Package                                 | Purpose                   |
+| --------------------------------------- | ------------------------- |
+| `net/http`                              | HTTP server & routing     |
+| `database/sql`                          | Database interface        |
+| `github.com/go-sql-driver/mysql`        | MySQL driver              |
+| `html/template`                         | HTML templating           |
+| `log/slog`                              | Structured logging        |
+| `github.com/justinas/alice`             | Middleware chaining       |
+| `github.com/go-playground/form/v4`      | Form decoding             |
+| `github.com/alexedwards/scs/v2`         | Session management        |
+| `github.com/alexedwards/scs/mysqlstore` | MySQL session store       |
+| `crypto/tls`                            | TLS configuration         |
+| `golang.org/x/crypto/bcrypt`            | Password hashing (bcrypt) |
 
 ---
 
