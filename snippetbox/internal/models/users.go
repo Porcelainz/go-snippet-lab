@@ -38,12 +38,6 @@ func (m *UserModel) Insert(name, email, password string) error {
 	// Execute the SQL statement
 	_, err = m.DB.Exec(stmt, name, email, string(hashedPassword))
 	if err != nil {
-		// If this returns an error, we use the errors.As() function to check
-		// whether the error has the type *mysql.MySQLError. If it does, the
-		// error will be assigned to the mySQLError variable. We can then check
-		// whether or not the error relates to our users_uc_email key by
-		// checking if the error code equals 1062 and the contents of the error
-		// message string. If it does, we return an ErrDuplicateEmail error.
 		var mySQLError *mysql.MySQLError
 		if errors.As(err, &mySQLError) {
 			if mySQLError.Number == 1062 && strings.Contains(mySQLError.Message, "users_uc_email") {
