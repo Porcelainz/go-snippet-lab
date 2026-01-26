@@ -1,10 +1,15 @@
+// Package validator provides form validation utilities for the Snippetbox application.
 package validator
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 )
+
+// EmailRX is a regular expression for sanity checking the format of email addresses
+var EmailRX = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$")
 
 type Validator struct {
 	FieldErrors map[string]string
@@ -36,6 +41,14 @@ func NotBlank(value string) bool {
 
 func MaxChars(value string, max int) bool {
 	return utf8.RuneCountInString(value) <= max
+}
+
+func MinChars(value string, min int) bool {
+	return utf8.RuneCountInString(value) >= min
+}
+
+func Matches(value string, rx *regexp.Regexp) bool {
+	return rx.MatchString(value)
 }
 
 func PermittedValue[T comparable](value T, permittedValues ...T) bool {
