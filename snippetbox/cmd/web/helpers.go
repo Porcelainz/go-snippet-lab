@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-playground/form/v4"
+	"github.com/justinas/nosurf"
 )
 
 func (app *application) serverError(w http.ResponseWriter, r *http.Request, err error) {
@@ -45,11 +46,12 @@ func (app *application) render(w http.ResponseWriter, r *http.Request, status in
 	buf.WriteTo(w)
 }
 
-func (app *application) newTemplates(r *http.Request) TemplatesData {
+func (app *application) newTemplateData(r *http.Request) TemplatesData {
 	return TemplatesData{
 		CurrentYear:     time.Now().Year(),
 		Flash:           app.sessionManager.PopString(r.Context(), "flash"),
 		IsAuthenticated: app.isAuthenticated(r),
+		CSRFToken:       nosurf.Token(r),
 	}
 }
 

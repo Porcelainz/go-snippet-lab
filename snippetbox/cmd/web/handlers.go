@@ -16,7 +16,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		app.serverError(w, r, err)
 		return
 	}
-	data := app.newTemplates(r)
+	data := app.newTemplateData(r)
 	data.Snippets = snippets
 	app.render(w, r, http.StatusOK, "home.tmpl", data)
 }
@@ -37,13 +37,13 @@ func (app *application) snippetView(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	data := app.newTemplates(r)
+	data := app.newTemplateData(r)
 	data.Snippet = snippet
 	app.render(w, r, http.StatusOK, "view.tmpl", data)
 }
 
 func (app *application) snippetCreate(w http.ResponseWriter, r *http.Request) {
-	data := app.newTemplates(r)
+	data := app.newTemplateData(r)
 	data.Form = snippetCreateForm{}
 	app.render(w, r, http.StatusOK, "create.tmpl", data)
 }
@@ -70,7 +70,7 @@ func (app *application) snippetCreatePost(w http.ResponseWriter, r *http.Request
 	form.CheckField(validator.PermittedValue(form.Expires, 1, 7, 365), "expires", "This field must equal 1, 7 or 365")
 
 	if !form.Valid() {
-		data := app.newTemplates(r)
+		data := app.newTemplateData(r)
 		data.Form = form
 		app.render(w, r, http.StatusBadRequest, "create.tmpl", data)
 	}
@@ -92,7 +92,7 @@ type userSignupForm struct {
 }
 
 func (app *application) userSignup(w http.ResponseWriter, r *http.Request) {
-	data := app.newTemplates(r)
+	data := app.newTemplateData(r)
 	data.Form = userSignupForm{}
 	app.render(w, r, http.StatusOK, "signup.tmpl", data)
 }
@@ -115,7 +115,7 @@ func (app *application) userSignupPost(w http.ResponseWriter, r *http.Request) {
 
 	// If there are any validation errors, redisplay the signup form
 	if !form.Valid() {
-		data := app.newTemplates(r)
+		data := app.newTemplateData(r)
 		data.Form = form
 		app.render(w, r, http.StatusUnprocessableEntity, "signup.tmpl", data)
 		return
@@ -128,7 +128,7 @@ func (app *application) userSignupPost(w http.ResponseWriter, r *http.Request) {
 		// and re-display it
 		if errors.Is(err, models.ErrDuplicateEmail) {
 			form.AddFieldError("email", "Email address is already in use")
-			data := app.newTemplates(r)
+			data := app.newTemplateData(r)
 			data.Form = form
 			app.render(w, r, http.StatusUnprocessableEntity, "signup.tmpl", data)
 		} else {
@@ -151,7 +151,7 @@ type userLoginForm struct {
 }
 
 func (app *application) userLogin(w http.ResponseWriter, r *http.Request) {
-	data := app.newTemplates(r)
+	data := app.newTemplateData(r)
 	data.Form = userLoginForm{}
 	app.render(w, r, http.StatusOK, "login.tmpl", data)
 }
@@ -172,7 +172,7 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	// If there are any validation errors, redisplay the login form
 	if !form.Valid() {
-		data := app.newTemplates(r)
+		data := app.newTemplateData(r)
 		data.Form = form
 		app.render(w, r, http.StatusUnprocessableEntity, "login.tmpl", data)
 		return
@@ -184,7 +184,7 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, models.ErrInvalidCredentials) {
 			form.AddNonFieldError("Email or password is incorrect")
-			data := app.newTemplates(r)
+			data := app.newTemplateData(r)
 			data.Form = form
 			app.render(w, r, http.StatusUnprocessableEntity, "login.tmpl", data)
 		} else {
