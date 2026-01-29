@@ -82,7 +82,7 @@ func (app *application) authenticated(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
 		if id == 0 {
-			http.Redirect(w, r, "/user/login", http.StatusSeeOther)
+			next.ServeHTTP(w, r)
 			return
 		}
 
@@ -92,7 +92,7 @@ func (app *application) authenticated(next http.Handler) http.Handler {
 			return
 		}
 		if exists {
-			ctx := context.WithValue(r.Context(), isAuthenticatedContextKeycontextKey, true)
+			ctx := context.WithValue(r.Context(), isAuthenticatedContextKey, true)
 			r = r.WithContext(ctx)
 		}
 		next.ServeHTTP(w, r)
