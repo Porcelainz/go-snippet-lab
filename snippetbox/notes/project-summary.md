@@ -31,7 +31,8 @@ snippetbox/
 │   │   ├── base.tmpl       # Base template
 │   │   ├── pages/          # Page templates (home, view, create, signup)
 │   │   └── partials/       # Partial templates
-│   └── static/             # CSS, JS, images
+│   ├── static/             # CSS, JS, images
+│   └── efs.go              # Embedded File System configuration
 └── notes/                  # Learning notes
 ```
 
@@ -66,6 +67,7 @@ All handlers are methods on `*application`, providing access to shared dependenc
 | `commonHeader` | Sets security headers (CSP, X-Frame-Options, etc.) |
 | `logRequest`   | Logs incoming requests using structured logging    |
 | `recoverPanic` | Graceful panic recovery to prevent server crashes  |
+| `secureHeaders`| Adds security-related HTTP headers                 |
 
 **File:** `cmd/web/routes.go`
 
@@ -74,7 +76,7 @@ All handlers are methods on `*application`, providing access to shared dependenc
 standard := alice.New(app.recoverPanic, app.logRequest, commonHeader)
 
 // Dynamic routes middleware (with sessions)
-dynamic := alice.New(app.sessionManager.LoadAndSave)
+dynamic := alice.New(app.sessionManager.LoadAndSave, noSurf, app.authenticated)
 ```
 
 ---
@@ -108,6 +110,8 @@ type TemplatesData struct {
     Snippets    []models.Snippet
     Form        any
     Flash       string  // For flash messages
+    IsAuthenticated bool
+    CSRFToken   string
 }
 
 var functions = template.FuncMap{
@@ -434,7 +438,11 @@ type userLoginForm struct {
 ```go
 // isAuthenticated checks if user is logged in
 func (app *application) isAuthenticated(r *http.Request) bool {
-    return app.sessionManager.Exists(r.Context(), "authenticatedUserID")
+    isAuthenticated, ok := r.Context().Value(isAuthenticatedContextKey).(bool)
+    if !ok {
+        return false
+    }
+    return isAuthenticated
 }
 ```
 
@@ -482,7 +490,7 @@ func (app *application) requireAuthentication(next http.Handler) http.Handler {
 
 ```go
 // Unprotected routes (available to all)
-dynamic := alice.New(app.sessionManager.LoadAndSave)
+dynamic := alice.New(app.sessionManager.LoadAndSave, noSurf, app.authenticated)
 
 // Protected routes (require login)
 protected := dynamic.Append(app.requireAuthentication)
@@ -511,6 +519,63 @@ mux.Handle("POST /user/logout", protected.ThenFunc(app.userLogoutPost))
 
 ---
 
+### 16. CSRF Protection
+
+**Package:** `github.com/justinas/nosurf`
+
+Uses the **Double Submit Cookie** pattern to prevent Cross-Site Request Forgery attacks.
+
+**File:** `cmd/web/middleware.go`
+
+```go
+func noSurf(next http.Handler) http.Handler {
+    csrf := nosurf.New(next)
+    csrf.SetBaseCookie(http.Cookie{
+        HttpOnly: true,
+        Path:     "/",
+        Secure:   true,
+    })
+    return csrf
+}
+```
+
+**Integration:**
+- Added `noSurf` to the `dynamic` middleware chain
+- `CSRFToken` passed to templates via `TemplatesData`
+- Use `{{.CSRFToken}}` hidden input in all forms
+
+---
+
+### 17. Static File Embedding
+
+**Package:** `embed`
+
+Allows the application to be compiled into a single self-contained binary by embedding the filesystem into the executable.
+
+**File:** `ui/efs.go`
+
+```go
+//go:embed static/*
+var Files embed.FS
+```
+
+**File:** `cmd/web/routes.go`
+
+```go
+fileServer := http.FileServer(http.FS(ui.Files))
+mux.Handle("GET /static/", fileServer)
+```
+
+**File:** `cmd/web/templates.go`
+
+Parsing embedded templates:
+
+```go
+ts, err := template.New(name).Funcs(functions).ParseFS(ui.Files, "html/base.tmpl", "html/partials/*.tmpl", page)
+```
+
+---
+
 ## 📊 Progress Checklist
 
 | Topic                                         | Status     |
@@ -534,7 +599,8 @@ mux.Handle("POST /user/logout", protected.ThenFunc(app.userLogoutPost))
 | User Authentication (Login/Logout)            | ✅ Done    |
 | Authorization (Route Protection)              | ✅ Done    |
 | Dynamic Navigation                            | ✅ Done    |
-| CSRF Protection                               | ⬜ Not yet |
+| CSRF Protection                               | ✅ Done    |
+| Static File Embedding                         | ✅ Done    |
 | Testing                                       | ⬜ Not yet |
 
 ---
@@ -554,6 +620,7 @@ mux.Handle("POST /user/logout", protected.ThenFunc(app.userLogoutPost))
 | `github.com/alexedwards/scs/mysqlstore` | MySQL session store       |
 | `crypto/tls`                            | TLS configuration         |
 | `golang.org/x/crypto/bcrypt`            | Password hashing (bcrypt) |
+| `github.com/justinas/nosurf`            | CSRF protection           |
 
 ---
 
@@ -568,5 +635,4 @@ mux.Handle("POST /user/logout", protected.ThenFunc(app.userLogoutPost))
 ## 📝 Related Notes
 
 - [Go Embedding](./go-embedding.md) - Struct embedding & composition
-
 - [Go Panic/Recover](./go-panic-recover.md) - Panic handling
